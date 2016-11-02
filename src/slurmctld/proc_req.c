@@ -5500,7 +5500,7 @@ inline static void _slurm_rpc_reboot_nodes(slurm_msg_t * msg)
 		bit_nset(bitmap, 0, (node_record_count - 1));
 	} else if (node_name2bitmap(nodelist, false, &bitmap) != 0) {
 		FREE_NULL_BITMAP(bitmap);
-		error("Invalid node list in REBOOT_NODES request");
+		error("Bad node list in REBOOT_NODES request: %s", nodelist);
 		slurm_send_rc_msg(msg, ESLURM_INVALID_NODE_NAME);
 		return;
 	}
@@ -5516,7 +5516,8 @@ inline static void _slurm_rpc_reboot_nodes(slurm_msg_t * msg)
 			bit_clear(bitmap, i);
 			continue;
 		}
-		node_ptr->node_state |= NODE_STATE_MAINT;
+		node_ptr->node_state |= NODE_STATE_REBOOT;
+// Add RPC flag to optionally set DRAIN and reason
 		want_nodes_reboot = true;
 	}
 

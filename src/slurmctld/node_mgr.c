@@ -561,6 +561,8 @@ extern int load_all_node_state ( bool state_only )
 				}
 				if (node_state & NODE_STATE_MAINT)
 					node_ptr->node_state |= NODE_STATE_MAINT;
+				if (node_state & NODE_STATE_REBOOT)
+					node_ptr->node_state |= NODE_STATE_REBOOT;
 				if (node_state & NODE_STATE_POWER_UP) {
 					if (power_save_mode) {
 						node_ptr->node_state |=
@@ -1482,13 +1484,15 @@ int update_node ( update_node_msg_t * update_node_msg )
 				node_ptr->node_state &= (~NODE_STATE_DRAIN);
 				node_ptr->node_state &= (~NODE_STATE_FAIL);
 				node_ptr->node_state &= (~NODE_STATE_MAINT);
+				node_ptr->node_state &= (~NODE_STATE_REBOOT);
 				if (IS_NODE_DOWN(node_ptr)) {
 					state_val = NODE_STATE_IDLE;
 #ifndef HAVE_FRONT_END
 					node_ptr->node_state |=
 							NODE_STATE_NO_RESPOND;
 #endif
-					node_ptr->last_response = now;
+					node_ptr->last_response = MAX(now,
+						node_ptr->last_response);
 					ping_nodes_now = true;
 				} else if (IS_NODE_FUTURE(node_ptr)) {
 					if (node_ptr->port == 0) {
@@ -1504,7 +1508,9 @@ int update_node ( update_node_msg_t * update_node_msg )
 						node_ptr->node_state |=
 							NODE_STATE_NO_RESPOND;
 #endif
-						node_ptr->last_response = now;
+						node_ptr->last_response =
+							MAX(now,
+							node_ptr->last_response);
 						ping_nodes_now = true;
 					} else {
 						error("slurm_set_addr failure "
@@ -1646,7 +1652,8 @@ int update_node ( update_node_msg_t * update_node_msg )
 				   (IS_NODE_POWER_UP(node_ptr))) {
 				/* Clear any reboot operation in progress */
 				node_ptr->node_state &= (~NODE_STATE_POWER_UP);
-				node_ptr->last_response = now;
+				node_ptr->last_response = MAX(now,
+						node_ptr->last_response);
 				state_val = base_state;
 			} else if (state_val == NODE_STATE_NO_RESPOND) {
 				node_ptr->node_state |= NODE_STATE_NO_RESPOND;
@@ -2156,6 +2163,7 @@ static bool _valid_node_state_change(uint32_t old, uint32_t new)
 			    (base_state == NODE_STATE_FUTURE) ||
 			    (node_flags & NODE_STATE_DRAIN)   ||
 			    (node_flags & NODE_STATE_FAIL)    ||
+			    (node_flags & NODE_STATE_REBOOT)  ||
 			    (node_flags & NODE_STATE_MAINT))
 				return true;
 			break;
@@ -2527,6 +2535,7 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 		info("Node %s now responding", node_ptr->name);
 		node_ptr->node_state &= (~NODE_STATE_NO_RESPOND);
 		node_ptr->node_state &= (~NODE_STATE_POWER_UP);
+		node_ptr->node_state &= (~NODE_STATE_REBOOT);
 		if (!is_node_in_maint_reservation(node_inx))
 			node_ptr->node_state &= (~NODE_STATE_MAINT);
 		last_node_update = now;
@@ -2576,10 +2585,12 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			debug("validate_node_specs: node %s registered with "
 			      "%u jobs",
 			      reg_msg->node_name,reg_msg->job_count);
-			if (IS_NODE_FUTURE(node_ptr) &&
-			    IS_NODE_MAINT(node_ptr) &&
-			    !is_node_in_maint_reservation(node_inx))
-				node_flags &= (~NODE_STATE_MAINT);
+			if (IS_NODE_FUTURE(node_ptr)) {
+				if (IS_NODE_MAINT(node_ptr) &&
+				    !is_node_in_maint_reservation(node_inx))
+					node_flags &= (~NODE_STATE_MAINT);
+				node_flags &= (~NODE_STATE_REBOOT);
+			}
 			if (reg_msg->job_count) {
 				node_ptr->node_state = NODE_STATE_ALLOCATED |
 					node_flags;
@@ -2602,7 +2613,6 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			}
 		} else if (IS_NODE_DOWN(node_ptr) &&
 			   ((slurmctld_conf.ret2service == 2) ||
-			    !xstrcmp(node_ptr->reason, "Scheduled reboot") ||
 			    ((slurmctld_conf.ret2service == 1) &&
 			     !xstrcmp(node_ptr->reason, "Not responding") &&
 			     (node_ptr->boot_time <
@@ -2622,14 +2632,13 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			if (!IS_NODE_DRAIN(node_ptr)
 			    && !IS_NODE_FAIL(node_ptr)) {
 				/* reason information is handled in
-				   clusteracct_storage_g_node_up()
-				*/
+				 * clusteracct_storage_g_node_up() */
 				clusteracct_storage_g_node_up(
 					acct_db_conn, node_ptr, now);
 			}
-		} else if (node_ptr->last_response
-			   && (node_ptr->boot_time > node_ptr->last_response)
-			   && (slurmctld_conf.ret2service != 2)) {
+		} else if (node_ptr->last_response &&
+			   (node_ptr->boot_time > node_ptr->last_response) &&
+			   (slurmctld_conf.ret2service != 2)) {
 			if (!node_ptr->reason ||
 			    (node_ptr->reason &&
 			     !xstrcmp(node_ptr->reason, "Not responding"))) {
@@ -2695,6 +2704,7 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 		       sizeof(acct_gather_energy_t));
 
 	node_ptr->last_response = MAX(now, node_ptr->last_response);
+	node_ptr->boot_req_time = (time_t) 0;
 
 	*newly_up = (!orig_node_avail && bit_test(avail_node_bitmap, node_inx));
 
@@ -2989,16 +2999,14 @@ extern int validate_nodes_via_front_end(
 				if (!IS_NODE_DRAIN(node_ptr) &&
 				    !IS_NODE_FAIL(node_ptr)) {
 					/* reason information is handled in
-					   clusteracct_storage_g_node_up()
-					*/
+					 * clusteracct_storage_g_node_up() */
 					clusteracct_storage_g_node_up(
 						acct_db_conn,
 						node_ptr, now);
 				}
 			} else if (IS_NODE_DOWN(node_ptr) &&
 				   ((slurmctld_conf.ret2service == 2) ||
-				    !xstrcmp(node_ptr->reason,
-					     "Scheduled reboot") ||
+				    (node_ptr->boot_req_time != 0)    ||
 				    ((slurmctld_conf.ret2service == 1) &&
 				     !xstrcmp(node_ptr->reason,
 					      "Not responding")))) {
@@ -3018,8 +3026,7 @@ extern int validate_nodes_via_front_end(
 				if (!IS_NODE_DRAIN(node_ptr) &&
 				    !IS_NODE_FAIL(node_ptr)) {
 					/* reason information is handled in
-					   clusteracct_storage_g_node_up()
-					*/
+					 * clusteracct_storage_g_node_up() */
 					clusteracct_storage_g_node_up(
 						acct_db_conn,
 						node_ptr, now);
@@ -3128,7 +3135,6 @@ static void _node_did_resp(front_end_record_t *fe_ptr)
 	}
 	if (IS_NODE_DOWN(fe_ptr) &&
 	    ((slurmctld_conf.ret2service == 2) ||
-	     !xstrcmp(fe_ptr->reason, "Scheduled reboot") ||
 	     ((slurmctld_conf.ret2service == 1) &&
 	      !xstrcmp(fe_ptr->reason, "Not responding")))) {
 		last_front_end_update = now;
@@ -3154,18 +3160,19 @@ static void _node_did_resp(struct node_record *node_ptr)
 	node_inx = node_ptr - node_record_table_ptr;
 	if (IS_NODE_POWER_UP(node_ptr) ||
 	    (IS_NODE_DOWN(node_ptr) &&
-	     !xstrcmp(node_ptr->reason, "Scheduled reboot"))) {
+	    (node_ptr->boot_req_time != 0))) {
 		if (node_ptr->boot_time < node_ptr->boot_req_time) {
 			debug("Still waiting for boot of node %s",
 			      node_ptr->name);
 			return;
 		}
 	}
-	node_ptr->last_response = now;
+	node_ptr->last_response = MAX(now, node_ptr->last_response);
 	if (IS_NODE_NO_RESPOND(node_ptr) || IS_NODE_POWER_UP(node_ptr)) {
 		info("Node %s now responding", node_ptr->name);
 		node_ptr->node_state &= (~NODE_STATE_NO_RESPOND);
 		node_ptr->node_state &= (~NODE_STATE_POWER_UP);
+		node_ptr->node_state &= (~NODE_STATE_REBOOT);
 		if (!is_node_in_maint_reservation(node_inx))
 			node_ptr->node_state &= (~NODE_STATE_MAINT);
 		last_node_update = now;
@@ -3186,7 +3193,7 @@ static void _node_did_resp(struct node_record *node_ptr)
 	}
 	if (IS_NODE_DOWN(node_ptr) &&
 	    ((slurmctld_conf.ret2service == 2) ||
-	     !xstrcmp(node_ptr->reason, "Scheduled reboot") ||
+	     (node_ptr->boot_req_time != 0)    ||
 	     ((slurmctld_conf.ret2service == 1) &&
 	      !xstrcmp(node_ptr->reason, "Not responding")))) {
 		node_ptr->last_idle = now;
