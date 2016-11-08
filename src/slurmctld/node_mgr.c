@@ -2619,6 +2619,12 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			     (node_ptr->boot_time <
 			      node_ptr->last_response)))) {
 			node_flags &= (~NODE_STATE_REBOOT);
+			if (!xstrcmp(node_ptr->reason, "Reboot ASAP")) {
+				xfree(node_ptr->reason);
+				node_ptr->reason_time = 0;
+				node_ptr->reason_uid = 0;
+				node_flags &= (~NODE_STATE_DRAIN);
+			}
 			if (reg_msg->job_count) {
 				node_ptr->node_state = NODE_STATE_ALLOCATED |
 					node_flags;

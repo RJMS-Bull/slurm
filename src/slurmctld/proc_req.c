@@ -5468,6 +5468,7 @@ inline static void  _slurm_rpc_accounting_update_msg(slurm_msg_t *msg)
 inline static void _slurm_rpc_reboot_nodes(slurm_msg_t * msg)
 {
 	int rc;
+	time_t now = time(NULL);
 	uid_t uid = g_slurm_auth_get_uid(msg->auth_cred,
 					 slurmctld_config.auth_info);
 #ifndef HAVE_FRONT_END
@@ -5517,7 +5518,14 @@ inline static void _slurm_rpc_reboot_nodes(slurm_msg_t * msg)
 			continue;
 		}
 		node_ptr->node_state |= NODE_STATE_REBOOT;
-// Add RPC flag to optionally set DRAIN and reason
+		if (reboot_msg->flags & REBOOT_FLAGS_ASAP) {
+			node_ptr->node_state |= NODE_STATE_DRAIN;
+			if (node_ptr->reason == NULL) {
+				node_ptr->reason = xstrdup("Reboot ASAP");
+				node_ptr->reason_time = now;
+				node_ptr->reason_uid = uid;
+			}
+		}
 		want_nodes_reboot = true;
 	}
 
