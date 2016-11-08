@@ -1596,7 +1596,6 @@ static void _queue_reboot_msg(void)
 		hostlist_push_host(reboot_agent_args->hostlist, node_ptr->name);
 		reboot_agent_args->node_count++;
 		node_ptr->node_state &= ~NODE_STATE_MAINT;
-		node_ptr->node_state &= ~NODE_STATE_REBOOT;
 		node_ptr->node_state &=  NODE_STATE_FLAGS;
 		node_ptr->node_state |=  NODE_STATE_DOWN;
 		bit_clear(avail_node_bitmap, i);

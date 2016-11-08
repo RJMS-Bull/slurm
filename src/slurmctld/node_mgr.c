@@ -2613,10 +2613,12 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			}
 		} else if (IS_NODE_DOWN(node_ptr) &&
 			   ((slurmctld_conf.ret2service == 2) ||
+			    IS_NODE_REBOOT(node_ptr) ||
 			    ((slurmctld_conf.ret2service == 1) &&
 			     !xstrcmp(node_ptr->reason, "Not responding") &&
 			     (node_ptr->boot_time <
 			      node_ptr->last_response)))) {
+			node_flags &= (~NODE_STATE_REBOOT);
 			if (reg_msg->job_count) {
 				node_ptr->node_state = NODE_STATE_ALLOCATED |
 					node_flags;
