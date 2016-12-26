@@ -668,7 +668,7 @@ void _update_power_in_layout_core(struct node_record *node_ptr, int node_i)
 	}
 }
 
-void _update_power_in_layout_node(node_ptr)
+void _update_power_in_layout_node(struct node_record *node_ptr)
 {
 	error("Not supported in Prototype");
 }
