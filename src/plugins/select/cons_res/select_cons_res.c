@@ -127,6 +127,7 @@ bitstr_t *idle_node_bitmap __attribute__((weak_import));
 uint16_t *cr_node_num_cores __attribute__((weak_import));
 uint32_t *cr_node_cores_offset __attribute__((weak_import));
 int slurmctld_tres_cnt __attribute__((weak_import)) = 0;
+bitstr_t *alloc_core_bitmap __attribute__((weak_import));
 #else
 slurm_ctl_conf_t slurmctld_conf;
 struct node_record *node_record_table_ptr;
@@ -141,6 +142,7 @@ bitstr_t *idle_node_bitmap;
 uint16_t *cr_node_num_cores;
 uint32_t *cr_node_cores_offset;
 int slurmctld_tres_cnt = 0;
+bitstr_t *alloc_core_bitmap;
 #endif
 
 /*
@@ -798,6 +800,7 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 	List gres_list;
 	int i, i_first, i_last, n;
 	bitstr_t *core_bitmap;
+        int core_begin, core_end, c, j = 0;
 
 	if (!job || !job->core_bitmap) {
 		error("%s: job %u has no job_resrcs info",
@@ -824,6 +827,19 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 			continue;  /* node lost by job resize */
 
 		node_ptr = select_node_record[i].node_ptr;
+                if ((powercap_get_cluster_current_cap() != 0) &&
+		    (which_power_layout() == 2)) {
+                        core_begin = cr_get_coremap_offset(i);
+                        core_end = cr_get_coremap_offset(i + 1);
+                        for (c = core_begin; c < core_end; c++, j++) {
+                                if (!bit_test(job->core_bitmap, j))
+                                        continue;
+                                bit_set(alloc_core_bitmap, c);
+                        }
+			adapt_layouts(job, job_ptr->details->cpu_freq_max, n,
+				      node_ptr->name, true);
+		}
+
 		if (action != 2) {
 			if (select_node_usage[i].gres_list)
 				gres_list = select_node_usage[i].gres_list;
@@ -851,11 +867,6 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 				      select_node_usage[i].alloc_memory,
 				      job_ptr->job_id);
 			}
-		}
-		if ((powercap_get_cluster_current_cap() != 0) &&
-		    (which_power_layout() == 2)) {
-			adapt_layouts(job, job_ptr->details->cpu_freq_max, n,
-				      node_ptr->name, true);
 		}
 	}
 	
@@ -1157,6 +1168,7 @@ static int _rm_job_from_res(struct part_res_record *part_record_ptr,
 	int first_bit, last_bit;
 	int i, n;
 	List gres_list;
+        int core_begin, core_end, c, j = 0;
 
 	if (select_state_initializing) {
 		/* Ignore job removal until select/cons_res data structures
@@ -1214,7 +1226,14 @@ static int _rm_job_from_res(struct part_res_record *part_record_ptr,
 					job->memory_allocated[n];
 		}
 		if ((powercap_get_cluster_current_cap() != 0) &&
-		    (which_power_layout() == 2)) {
+		    (which_power_layout() == 2) && action == 3) {
+                        core_begin = cr_get_coremap_offset(i);
+                        core_end = cr_get_coremap_offset(i + 1);
+                        for (c = core_begin; c < core_end; c++, j++) {
+                                if (!bit_test(job->core_bitmap, j))
+                                        continue;
+                                bit_clear(alloc_core_bitmap, c);
+                        }
 			adapt_layouts(job, job_ptr->details->cpu_freq_max, n,
 				      node_ptr->name, false);
 		}
@@ -2144,6 +2163,10 @@ extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 				     sizeof(struct node_res_record));
 	select_node_usage  = xmalloc(node_cnt *
 				     sizeof(struct node_use_record));
+        if (alloc_core_bitmap == NULL) {
+                int core_cnt = cr_get_coremap_offset(select_node_cnt);
+                alloc_core_bitmap = bit_alloc(core_cnt);
+        }
 
 	for (i = 0; i < select_node_cnt; i++) {
 		select_node_record[i].node_ptr = &node_ptr[i];
@@ -2401,7 +2424,7 @@ extern int select_p_job_fini(struct job_record *job_ptr)
 	xassert(job_ptr);
 	xassert(job_ptr->magic == JOB_MAGIC);
 
-	_rm_job_from_res(select_part_record, select_node_usage, job_ptr, 0);
+	_rm_job_from_res(select_part_record, select_node_usage, job_ptr, 3);
 
 	return SLURM_SUCCESS;
 }

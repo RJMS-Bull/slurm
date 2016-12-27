@@ -64,6 +64,8 @@
 #define L_NUM_FREQ	"NumFreqChoices"
 #define L_CUR_POWER	"CurrentCorePower"
 
+bitstr_t *alloc_core_bitmap = NULL;
+
 static bool _powercap_enabled(void)
 {
 	if (powercap_get_cluster_current_cap() == 0)

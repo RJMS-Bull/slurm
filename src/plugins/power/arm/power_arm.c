@@ -344,6 +344,7 @@ void _dump_power_details()
 	}
 	debug("%s cluster_power = %f cluster_cap = %u nb_nodes = %u",__func__,
 			cluster_power, cap_watts, node_cont);
+        debug("%s finished", __func__);
 }
 
 /* Periodically attempt to re-balance power caps across sockets, based on
@@ -620,6 +621,7 @@ int _get_power()
 
 		_get_node_power(node_ptr, i);
 	}
+        debug("%s finished", __func__);
 	return SLURM_SUCCESS;
 }
 
@@ -627,7 +629,7 @@ void _update_power_in_layout_core(struct node_record *node_ptr, int node_i)
 {
 	int i, j = 0, core_begin = 0, core_end = 0;
 	uint32_t idle_cores_power = 0, nb_idle_core = 0;
-	uint32_t cores_in_node = (node_ptr->sockets * node_ptr->cores);
+	uint16_t cores_in_node = (node_ptr->sockets * node_ptr->cores);
 	uint32_t core_power = 0, core_power_precision = 0, node_power = 0;
 	char ename[125];
 
@@ -698,6 +700,7 @@ static void  _update_power_in_layout(int layout_type)
 		}
 	}
 	layouts_entity_pull_kv("power", "Cluster", "CurrentSumPower");
+        debug("%s finished", __func__);
 }
 
 int _create_tcp_socket()

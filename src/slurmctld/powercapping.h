@@ -41,6 +41,8 @@
 #include <time.h>
 #include "src/slurmctld/slurmctld.h"
 
+extern bitstr_t *alloc_core_bitmap; // allocated core for power/arm
+
 /**
  * powercap_get_cluster_max_watts
  * return the max power consumption of the cluster
